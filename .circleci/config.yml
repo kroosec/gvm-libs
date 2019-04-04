@@ -2,7 +2,7 @@ version: 2
 jobs:
   build_gcc_core:
     docker:
-      - image: greenbone/build-env-gvm-libs-master-debian-stretch-gcc-core
+      - image: greenbone/build-env-gvm-libs-gvm-libs-1.0-debian-stretch-gcc-core
     steps:
       - checkout
       - run:
@@ -10,7 +10,7 @@ jobs:
           command: mkdir build && cd build/ && cmake -DCMAKE_BUILD_TYPE=Release .. && make install
   scan_build:
     docker:
-      - image: greenbone/build-env-gvm-libs-master-debian-stretch-clang-core
+      - image: greenbone/build-env-gvm-libs-gvm-libs-1.0-debian-stretch-clang-core
     steps:
       - checkout
       - run:
