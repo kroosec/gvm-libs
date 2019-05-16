@@ -444,29 +444,27 @@ static kb_t
 redis_find (const char *kb_path, const char *key)
 {
   struct kb_redis *kbr;
-  unsigned int i = 1;
+  size_t i;
 
   kbr = g_malloc0 (sizeof (struct kb_redis) + strlen (kb_path) + 1);
   kbr->kb.kb_ops = &KBRedisOperations;
   strncpy (kbr->path, kb_path, strlen (kb_path));
 
-  do
+  kbr->rctx = redisConnectUnix (kbr->path);
+  if (kbr->rctx == NULL || kbr->rctx->err)
+    {
+      g_log (G_LOG_DOMAIN, G_LOG_LEVEL_CRITICAL,
+             "%s: redis connection error: %s", __func__,
+             kbr->rctx ? kbr->rctx->errstr : strerror (ENOMEM));
+      redisFree (kbr->rctx);
+      g_free (kbr);
+      return NULL;
+    }
+  fetch_max_db_index (kbr);
+
+  for (i = 1; i < kbr->max_db; i++)
     {
       redisReply *rep;
-
-      kbr->rctx = redisConnectUnix (kbr->path);
-      if (kbr->rctx == NULL || kbr->rctx->err)
-        {
-          g_log (G_LOG_DOMAIN, G_LOG_LEVEL_CRITICAL,
-                 "%s: redis connection error: %s", __func__,
-                 kbr->rctx ? kbr->rctx->errstr : strerror (ENOMEM));
-          redisFree (kbr->rctx);
-          g_free (kbr);
-          return NULL;
-        }
-
-      if (kbr->max_db == 0)
-        fetch_max_db_index (kbr);
 
       kbr->db = i;
       rep = redisCommand (kbr->rctx, "HEXISTS %s %d", GLOBAL_DBINDEX_NAME, i);
@@ -474,19 +472,11 @@ redis_find (const char *kb_path, const char *key)
         {
           if (rep != NULL)
             freeReplyObject (rep);
-          i++;
-          redisFree (kbr->rctx);
-          kbr->rctx = NULL;
           continue;
         }
       freeReplyObject (rep);
       rep = redisCommand (kbr->rctx, "SELECT %u", i);
-      if (rep == NULL || rep->type != REDIS_REPLY_STATUS)
-        {
-          redisFree (kbr->rctx);
-          kbr->rctx = NULL;
-        }
-      else
+      if (rep && rep->type == REDIS_REPLY_STATUS)
         {
           freeReplyObject (rep);
           if (key)
@@ -498,12 +488,10 @@ redis_find (const char *kb_path, const char *key)
                   return (kb_t) kbr;
                 }
             }
-          redisFree (kbr->rctx);
         }
-      i++;
     }
-  while (i < kbr->max_db);
 
+  redisFree (kbr->rctx);
   g_free (kbr);
   return NULL;
 }
