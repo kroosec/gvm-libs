@@ -1350,46 +1350,40 @@ redis_lnk_reset (kb_t kb)
 static int
 redis_flush_all (kb_t kb, const char *except)
 {
-  unsigned int i = 1;
+  size_t i;
   struct kb_redis *kbr;
 
   kbr = redis_kb (kb);
-  if (kbr->rctx)
-    redisFree (kbr->rctx);
+  if (!kbr->rctx)
+    kbr->rctx = redisConnectUnix (kbr->path);
+  if (kbr->rctx == NULL || kbr->rctx->err)
+    {
+      g_log (G_LOG_DOMAIN, G_LOG_LEVEL_CRITICAL,
+             "%s: redis connection error: %s", __func__,
+             kbr->rctx ? kbr->rctx->errstr : strerror (ENOMEM));
+      redisFree (kbr->rctx);
+      kbr->rctx = NULL;
+      return -1;
+    }
+  if (!kbr->max_db)
+    fetch_max_db_index (kbr);
 
   g_debug ("%s: deleting all DBs at %s except %s", __func__, kbr->path, except);
-  do
+  for (i = 1; i < kbr->max_db; i++)
     {
       redisReply *rep;
-
-      kbr->rctx = redisConnectUnix (kbr->path);
-      if (kbr->rctx == NULL || kbr->rctx->err)
-        {
-          g_log (G_LOG_DOMAIN, G_LOG_LEVEL_CRITICAL,
-                 "%s: redis connection error: %s", __func__,
-                 kbr->rctx ? kbr->rctx->errstr : strerror (ENOMEM));
-          redisFree (kbr->rctx);
-          kbr->rctx = NULL;
-          return -1;
-        }
 
       kbr->db = i;
       rep = redisCommand (kbr->rctx, "HEXISTS %s %d", GLOBAL_DBINDEX_NAME, i);
       if (rep == NULL || rep->type != REDIS_REPLY_INTEGER || rep->integer != 1)
         {
           freeReplyObject (rep);
-          redisFree (kbr->rctx);
-          i++;
           continue;
         }
       freeReplyObject (rep);
       rep = redisCommand (kbr->rctx, "SELECT %u", i);
       if (rep == NULL || rep->type != REDIS_REPLY_STATUS)
-        {
-          freeReplyObject (rep);
-          redisFree (kbr->rctx);
-          kbr->rctx = NULL;
-        }
+        freeReplyObject (rep);
       else
         {
           freeReplyObject (rep);
@@ -1400,18 +1394,13 @@ redis_flush_all (kb_t kb, const char *except)
               if (tmp)
                 {
                   g_free (tmp);
-                  i++;
-                  redisFree (kbr->rctx);
                   continue;
                 }
             }
           redis_delete_all (kbr);
           redis_release_db (kbr);
-          redisFree (kbr->rctx);
         }
-      i++;
     }
-  while (i < kbr->max_db);
 
   g_free (kb);
   return 0;
