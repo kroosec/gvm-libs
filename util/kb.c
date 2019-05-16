@@ -164,24 +164,21 @@ static int
 select_database (struct kb_redis *kbr)
 {
   int rc;
+  size_t i;
   redisContext *ctx = kbr->rctx;
   redisReply *rep = NULL;
 
-  if (kbr->db == 0)
+  if (!kbr->db)
+    return 0;
+
+  if (kbr->max_db == 0)
+    fetch_max_db_index (kbr);
+  for (i = 1; i < kbr->max_db; i++)
     {
-      unsigned i;
-
-      if (kbr->max_db == 0)
-        fetch_max_db_index (kbr);
-
-      for (i = 1; i < kbr->max_db; i++)
-        {
-          rc = try_database_index (kbr, i);
-          if (rc == 0)
-            break;
-        }
+      rc = try_database_index (kbr, i);
+      if (rc == 0)
+        break;
     }
-
   /* No DB available, give up. */
   if (kbr->db == 0)
     {
@@ -235,6 +232,7 @@ redis_release_db (struct kb_redis *kbr)
       rc = -1;
       goto err_cleanup;
     }
+  kbr->db = 0;
 
   rc = 0;
 
@@ -466,7 +464,6 @@ redis_find (const char *kb_path, const char *key)
     {
       redisReply *rep;
 
-      kbr->db = i;
       rep = redisCommand (kbr->rctx, "HEXISTS %s %d", GLOBAL_DBINDEX_NAME, i);
       if (rep == NULL || rep->type != REDIS_REPLY_INTEGER || rep->integer != 1)
         {
@@ -485,6 +482,7 @@ redis_find (const char *kb_path, const char *key)
               if (tmp)
                 {
                   g_free (tmp);
+                  kbr->db = i;
                   return (kb_t) kbr;
                 }
             }
@@ -1373,7 +1371,6 @@ redis_flush_all (kb_t kb, const char *except)
     {
       redisReply *rep;
 
-      kbr->db = i;
       rep = redisCommand (kbr->rctx, "HEXISTS %s %d", GLOBAL_DBINDEX_NAME, i);
       if (rep == NULL || rep->type != REDIS_REPLY_INTEGER || rep->integer != 1)
         {
@@ -1386,6 +1383,7 @@ redis_flush_all (kb_t kb, const char *except)
         freeReplyObject (rep);
       else
         {
+          kbr->db = i;
           freeReplyObject (rep);
           /* Don't remove DB if it has "except" key. */
           if (except)
